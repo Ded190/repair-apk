@@ -411,7 +411,6 @@ class RepairApp(App):
             card.bind(on_touch_down=self._card_tap(cid))
             grid.add_widget(card)
         scroll = ScrollView(do_scroll_x=False)
-        grid.width = None
         scroll.add_widget(grid)
         root.add_widget(scroll)
 
