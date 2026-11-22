@@ -261,6 +261,39 @@ class Tile(Button):
         self._rect.size = self.size
 
 
+DEBUG_TB = None
+
+
+def make_error_screen(tb):
+    """Отладочный экран: показывает traceback прямо в приложении."""
+    root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+    head = Label(text="Ошибка запуска (отладка)", font_size="16sp", bold=True,
+                 color=DANGER, size_hint_y=None, height=dp(30),
+                 halign="center", valign="middle")
+    head.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+    root.add_widget(head)
+    hint = Label(text="Сделайте скриншот этого текста и пришлите Алисе",
+                 font_size="13sp", color=MUTED, size_hint_y=None, height=dp(24),
+                 halign="center", valign="middle")
+    hint.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+    root.add_widget(hint)
+    scroll = ScrollView(do_scroll_x=False)
+    lbl = Label(text=tb, font_size="11sp", color=(0.1, 0.1, 0.1, 1),
+                halign="left", valign="top", size_hint_y=None)
+    lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
+    lbl.bind(texture_size=lbl.setter("size"))
+    scroll.add_widget(lbl)
+    root.add_widget(scroll)
+    return root
+
+
+class DebugApp(App):
+    title = "Ошибка запуска"
+
+    def build(self):
+        return make_error_screen(DEBUG_TB)
+
+
 def make_row(label_text, kind, default, options=None):
     box = Panel(radius=12, orientation="vertical", size_hint_y=None,
                 height=dp(66), padding=[dp(10), dp(6), dp(10), dp(6)])
@@ -289,6 +322,19 @@ class RepairApp(App):
     title = "Стройка и ремонт"
 
     def build(self):
+        try:
+            return self._real_build()
+        except Exception:
+            import traceback
+            global DEBUG_TB
+            DEBUG_TB = traceback.format_exc()
+            print("ОТЛАДКА: ошибка в build():\n" + DEBUG_TB)
+            return self._error_screen(DEBUG_TB)
+
+    def _error_screen(self, tb):
+        return make_error_screen(tb)
+
+    def _real_build(self):
         self.field_widgets = {}
         self.saved = self.load_state()
         sm = ScreenManager()
@@ -482,4 +528,13 @@ class RepairApp(App):
 
 
 if __name__ == "__main__":
-    RepairApp().run()
+    try:
+        RepairApp().run()
+    except Exception:
+        import traceback
+        DEBUG_TB = traceback.format_exc()
+        traceback.print_exc()
+        try:
+            DebugApp().run()
+        except Exception:
+            traceback.print_exc()
