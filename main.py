@@ -1,15 +1,68 @@
 # -*- coding: utf-8 -*-
 """Стройка и ремонт — калькуляторы (Kivy, APK).
-Версия 9 (диагностическая): запуск целиком обёрнут в защиту. Если приложение
+Версия 10 (чёрный ящик): ранний лог ступеней запуска + показ лога прошлого падения. Если приложение
 падает даже до главного экрана (сбой импорта или до окна), ошибка показывается
 на отдельном экране; если и это невозможно — отправляется через системное меню
 «Поделиться» или сохраняется в Download/repaircalc_crash.txt.
 Пришли текст ошибки Алисе. В остальном — версия 8 без изменений:
 13 калькуляторов, 5 тем, запоминание ввода, «Поделиться»."""
 
+import os
+import sys
+import time
 import traceback
 
 DEBUG_TB = None
+
+# ===== ЧЁРНЫЙ ЯЩИК: ранний лог каждой ступени запуска =====
+RUNLOG_PATH = None
+OLD_RUNLOG = None
+
+
+def _pick_log_path():
+    global RUNLOG_PATH
+    p = os.environ.get("ANDROID_PRIVATE") or os.environ.get("ANDROID_APP_PATH")
+    if not p:
+        p = os.environ.get("HOME") or "/data/data/org.ded190.repaircalc/files"
+    RUNLOG_PATH = os.path.join(p, "repaircalc_runlog.txt")
+
+
+def _runlog(msg):
+    try:
+        global RUNLOG_PATH
+        if RUNLOG_PATH is None:
+            _pick_log_path()
+        try:
+            if os.path.exists(RUNLOG_PATH) and os.path.getsize(RUNLOG_PATH) > 200000:
+                os.remove(RUNLOG_PATH)
+        except Exception:
+            pass
+        with open(RUNLOG_PATH, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+
+def _read_runlog():
+    try:
+        with open(RUNLOG_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return "(лог недоступен)"
+
+
+_pick_log_path()
+try:
+    with open(RUNLOG_PATH, "r", encoding="utf-8") as f:
+        prev = f.read()
+    OLD_RUNLOG = prev[-8000:] if prev.strip() and "RUN OK" not in prev else None
+except Exception:
+    OLD_RUNLOG = None
+try:
+    with open(RUNLOG_PATH, "w", encoding="utf-8") as f:
+        f.write("=== НОВЫЙ ЗАПУСК " + time.strftime("%d.%m.%Y %H:%M:%S") + " ===\n")
+except Exception:
+    pass
 
 
 def _crash_toast(msg):
@@ -85,6 +138,15 @@ def _crash_file(tb):
 
 try:
     # -*- coding: utf-8 -*-
+    if OLD_RUNLOG:
+        _runlog("СТАДИЯ 0: показываю лог прошлого падения")
+        tb_old = ("Прошлый запуск упал до главного экрана. Вот его лог ступеней:\n"
+                  "=== ЛОГ ПРОШЛОГО ЗАПУСКА ===\n" + OLD_RUNLOG
+                  + "\n(Следующий запуск приложения будет обычным.)")
+        if not _crash_screen(tb_old):
+            _crash_share(tb_old)
+        _runlog("RUN OK (лог прошлого запуска показан)")
+        sys.exit(0)
     """Стройка и ремонт — калькуляторы (Kivy, APK).
     Версия 8: 13 калькуляторов + эргономика + починенная отправка + выбор темы
     (Синяя, Оранжевая, Зелёная, Фиолетовая, Тёмная) на главном экране; выбор запоминается.
@@ -106,6 +168,8 @@ try:
     from kivy.uix.button import Button
     from kivy.metrics import dp
     from kivy.graphics import Color, RoundedRectangle
+
+    _runlog("СТАДИЯ 1: импорты kivy пройдены")
 
     GOOD = (0.16, 0.55, 0.32, 1)
     DANGER = (0.78, 0.27, 0.21, 1)
@@ -815,6 +879,7 @@ try:
             return make_error_screen(tb)
 
         def _real_build(self):
+            _runlog("СТАДИЯ 5: build() начался")
             self.field_widgets = {}
             self.saved = self.load_state()
             name = self.saved.get("_theme", DEFAULT_THEME)
@@ -830,6 +895,7 @@ try:
                 Window.bind(on_keyboard=self._on_key)
             except Exception:
                 pass
+            _runlog("СТАДИЯ 6: RUN OK — build() готов")
             return sm
 
         def set_theme(self, spinner, value):
@@ -1123,10 +1189,16 @@ try:
             self._toast("Не удалось отправить")
 
 
+    _runlog("СТАДИЯ 4: запуск главного цикла RepairApp.run()")
     RepairApp().run()
+    _runlog("СТАДИЯ 8: run() вернулся")
 
-except BaseException:
+except Exception:
+    _runlog("СТАДИЯ 7: КРАШ\n" + traceback.format_exc())
     CRASH = traceback.format_exc()
+    if OLD_RUNLOG:
+        CRASH += "\n\n=== ЛОГ ПРОШЛОГО ЗАПУСКА ===\n" + OLD_RUNLOG
+    CRASH += "\n\n=== ЛОГ ЭТОГО ЗАПУСКА ===\n" + _read_runlog()
     traceback.print_exc()
     if not _crash_screen(CRASH):
         if not _crash_share(CRASH):
