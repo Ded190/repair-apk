@@ -616,3 +616,519 @@ try:
             "fields": [
                 ("area", "Площадь пола, м²", "num", ""),
                 ("thick", "Толщина слоя, мм", "num", ""),
+                ("type", "Смесь", "spin", "ЦПС (цементно-песчаная)",
+                 ["ЦПС (цементно-песчаная)", "Наливной пол", "Керамзитобетон", "Своя цифра"]),
+                ("custom", "Свой расход, кг/м²/мм", "num", ""),
+                ("bag", "Вес мешка, кг", "num", "40"),
+            ],
+            "compute": c_screed,
+        },
+        {
+            "id": "laminate", "title": "Ламинат",
+            "req": ["w", "l"],
+            "fields": [
+                ("w", "Длина комнаты, м", "num", ""),
+                ("l", "Ширина комнаты, м", "num", ""),
+                ("pw", "Длина доски, см", "num", "128"),
+                ("pl", "Ширина доски, см", "num", "19"),
+                ("pack", "Досок в упаковке", "num", "8"),
+                ("reserve", "Запас, %", "num", "7"),
+                ("pod", "Площадь подложки в рулоне, м²", "num", "15"),
+            ],
+            "compute": c_laminate,
+        },
+        {
+            "id": "tile", "title": "Плитка",
+            "req": ["area", "tw", "th"],
+            "fields": [
+                ("area", "Площадь облицовки, м²", "num", ""),
+                ("tw", "Ширина плитки, см", "num", "30"),
+                ("th", "Высота плитки, см", "num", "30"),
+                ("box", "Плиток в коробке", "num", "11"),
+                ("reserve", "Запас, %", "num", "10"),
+                ("glue", "Расход клея, кг/м²", "num", "5"),
+                ("bag", "Вес мешка клея, кг", "num", "25"),
+                ("joint", "Ширина шва, мм", "num", "3"),
+                ("depth", "Глубина шва, мм", "num", "8"),
+            ],
+            "compute": c_tile,
+        },
+        {
+            "id": "plinth", "title": "Плинтус",
+            "req": ["perim"],
+            "fields": [
+                ("perim", "Периметр комнаты, м", "num", ""),
+                ("doors", "Дверных проёмов всего, м", "num", "0.9"),
+                ("pl_len", "Длина планки, м", "num", "2.5"),
+                ("reserve", "Запас, %", "num", "5"),
+            ],
+            "compute": c_plinth,
+        },
+        {
+            "id": "concrete", "title": "Бетон и раствор",
+            "req": ["w", "l", "thick"],
+            "fields": [
+                ("w", "Длина, м", "num", ""),
+                ("l", "Ширина, м", "num", ""),
+                ("thick", "Толщина слоя, см", "num", ""),
+                ("grade", "Марка бетона", "spin", "М200 (дорожки, отмостка)",
+                 ["М200 (дорожки, отмостка)", "М250 (фундамент, столбы)", "М300 (плита, перекрытие)"]),
+                ("bag", "Вес мешка цемента, кг", "num", "50"),
+            ],
+            "compute": c_concrete,
+        },
+        {
+            "id": "insulation", "title": "Утеплитель",
+            "req": ["area"],
+            "fields": [
+                ("area", "Площадь утепления, м²", "num", ""),
+                ("thick", "Толщина, мм", "num", "50"),
+                ("sw", "Длина плиты, см", "num", "100"),
+                ("sh", "Ширина плиты, см", "num", "60"),
+                ("pack", "Плит в упаковке", "num", "6"),
+                ("reserve", "Запас, %", "num", "10"),
+            ],
+            "compute": c_insulation,
+        },
+        {
+            "id": "heat", "title": "Отопление",
+            "req": ["area"],
+            "fields": [
+                ("area", "Площадь, м²", "num", ""),
+                ("height", "Высота потолка, м", "num", "2.7"),
+                ("insul", "Утепление", "spin", "Среднее", ["Хорошее", "Среднее", "Слабое"]),
+                ("section", "Мощность секции, Вт", "num", "170"),
+            ],
+            "compute": c_heat,
+        },
+    ]
+
+    SCREEN_BY_ID = {cfg["id"]: cfg for cfg in SCREENS}
+
+
+    class Panel(BoxLayout):
+        """Карточка со скруглёнными углами."""
+
+        def __init__(self, bg=None, radius=16, **kw):
+            if bg is None:
+                bg = THEME["card"]
+            super().__init__(**kw)
+            with self.canvas.before:
+                Color(*bg)
+                self._rect = RoundedRectangle(radius=[dp(radius)])
+            self.bind(pos=self._sync, size=self._sync)
+
+        def _sync(self, *_args):
+            self._rect.pos = self.pos
+            self._rect.size = self.size
+
+
+    class Tile(Button):
+        """Плоская цветная кнопка без стандартной текстуры."""
+
+        def __init__(self, bg=None, radius=12, **kw):
+            if bg is None:
+                bg = THEME["accent"]
+            super().__init__(background_normal="", background_down="", **kw)
+            with self.canvas.before:
+                Color(*bg)
+                self._rect = RoundedRectangle(radius=[dp(radius)])
+            self.bind(pos=self._sync, size=self._sync)
+
+        def _sync(self, *_args):
+            self._rect.pos = self.pos
+            self._rect.size = self.size
+
+
+    DEBUG_TB = None
+
+
+    def make_error_screen(tb):
+        """Отладочный экран: показывает traceback прямо в приложении."""
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+        head = Label(text="Ошибка запуска (отладка)", font_size="16sp", bold=True,
+                     color=DANGER, size_hint_y=None, height=dp(30),
+                     halign="center", valign="middle")
+        head.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+        root.add_widget(head)
+        hint = Label(text="Сделайте скриншот этого текста и пришлите Алисе",
+                     font_size="13sp", color=THEME["muted"], size_hint_y=None, height=dp(24),
+                     halign="center", valign="middle")
+        hint.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+        root.add_widget(hint)
+        scroll = ScrollView(do_scroll_x=False)
+        lbl = Label(text=tb, font_size="11sp", color=THEME["text"],
+                    halign="left", valign="top", size_hint_y=None)
+        lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
+        lbl.bind(texture_size=lbl.setter("size"))
+        scroll.add_widget(lbl)
+        root.add_widget(scroll)
+        return root
+
+
+    class DebugApp(App):
+        title = "Ошибка запуска"
+
+        def build(self):
+            return make_error_screen(DEBUG_TB)
+
+
+    def make_row(label_text, kind, default, options=None):
+        box = Panel(radius=12, orientation="vertical", size_hint_y=None,
+                    height=dp(66), padding=[dp(10), dp(6), dp(10), dp(6)])
+        lbl = Label(text=label_text, font_size="13sp", color=THEME["muted"],
+                    size_hint_y=None, height=dp(20), halign="left", valign="middle")
+        lbl.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+        box.add_widget(lbl)
+        if kind == "spin":
+            widget = Spinner(text=default, values=options, font_size="15sp",
+                             size_hint_y=None, height=dp(34),
+                             background_normal="", background_down="",
+                             background_color=(0.93, 0.94, 0.96, 1))
+        else:
+            widget = TextInput(multiline=False, text=default, font_size="16sp",
+                               size_hint_y=None, height=dp(34),
+                               background_normal="", background_active="",
+                               background_color=(0.93, 0.94, 0.96, 1),
+                               foreground_color=THEME["text"],
+                               input_filter=float_filter if kind == "num" else None,
+                               input_type="number" if kind == "num" else "text",
+                               padding=[dp(8), dp(6), dp(8), dp(4)])
+        box.add_widget(widget)
+        return box, widget
+
+
+    class RepairApp(App):
+        title = "Стройка и ремонт"
+
+        def build(self):
+            try:
+                return self._real_build()
+            except Exception:
+                import traceback
+                global DEBUG_TB
+                DEBUG_TB = traceback.format_exc()
+                print("ОТЛАДКА: ошибка в build():\n" + DEBUG_TB)
+                return self._error_screen(DEBUG_TB)
+
+        def _error_screen(self, tb):
+            return make_error_screen(tb)
+
+        def _real_build(self):
+            self.field_widgets = {}
+            self.saved = self.load_state()
+            name = self.saved.get("_theme", DEFAULT_THEME)
+            self.theme_name = name if name in THEMES else DEFAULT_THEME
+            apply_theme(self.theme_name)
+            sm = ScreenManager()
+            sm.add_widget(self.home_screen())
+            for cfg in SCREENS:
+                sm.add_widget(self.calc_screen(cfg))
+            try:
+                from kivy.core.window import Window
+                Window.clearcolor = THEME["bg"]
+                Window.bind(on_keyboard=self._on_key)
+            except Exception:
+                pass
+            return sm
+
+        def set_theme(self, spinner, value):
+            if value == self.theme_name or value not in THEMES:
+                return
+            self.theme_name = value
+            apply_theme(value)
+            self.save_state()
+            try:
+                from kivy.core.window import Window
+                Window.clearcolor = THEME["bg"]
+            except Exception:
+                pass
+            sm = self.root
+            sm.clear_widgets()
+            self.field_widgets = {}
+            sm.add_widget(self.home_screen())
+            for cfg in SCREENS:
+                sm.add_widget(self.calc_screen(cfg))
+            sm.current = "home"
+
+        # --- сохранение ввода ---
+        def _state_path(self):
+            try:
+                return os.path.join(self.user_data_dir, "repaircalc.json")
+            except Exception:
+                return None
+
+        def load_state(self):
+            path = self._state_path()
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+
+        def save_state(self):
+            path = self._state_path()
+            if not path:
+                return
+            data = {}
+            for sid, ws in self.field_widgets.items():
+                data[sid] = {k: w.text for k, w in ws.items() if hasattr(w, "text")}
+            data["_theme"] = getattr(self, "theme_name", DEFAULT_THEME)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+            except Exception:
+                pass
+
+        def on_stop(self):
+            self.save_state()
+
+        def on_pause(self):
+            self.save_state()
+            return True
+
+        # --- экраны ---
+        def _on_key(self, window, key, *_args):
+            if key == 27 and self.root and self.root.current != "home":
+                self.root.current = "home"
+                return True
+            return False
+
+        def _blur_all(self, *_args):
+            for ws in self.field_widgets.values():
+                for w in ws.values():
+                    if hasattr(w, "focus") and w.focus:
+                        w.focus = False
+
+        def _maybe_blur(self, sid):
+            def handler(instance, touch):
+                for w in self.field_widgets.get(sid, {}).values():
+                    if hasattr(w, "focus") and w.focus and not w.collide_point(*touch.pos):
+                        w.focus = False
+            return handler
+
+        def do_reset(self, cfg, widgets, result, result_panel):
+            for f in cfg["fields"]:
+                key, default = f[0], (f[3] if len(f) > 3 else "")
+                widgets[key].text = default
+            result.text = "Нажмите «Рассчитать»"
+            result.color = THEME["text"]
+            self._blur_all()
+            self.save_state()
+
+        def open_screen(self, cid):
+            self._blur_all()
+            self.root.current = cid
+
+        def home_screen(self):
+            screen = Screen(name="home")
+            root = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(10))
+            header = Panel(bg=THEME["accent"], radius=18, size_hint_y=None, height=dp(104),
+                           padding=[dp(16), dp(10), dp(16), dp(10)])
+            header.add_widget(Label(text="Стройка и ремонт", font_size="24sp", bold=True,
+                                    color=(1, 1, 1, 1), halign="left", valign="middle",
+                                    size_hint_y=None, height=dp(34)))
+            sub = Label(text=str(N_CALCS) + " калькуляторов материалов",
+                        font_size="13sp", color=(1, 1, 1, 0.85),
+                        halign="left", valign="top")
+            sub.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+            header.add_widget(sub)
+            root.add_widget(header)
+
+            body = BoxLayout(orientation="vertical", spacing=dp(12), size_hint_y=None)
+            body.bind(minimum_height=body.setter("height"))
+            color_i = 0
+            for sec_title, items in SECTIONS:
+                sec_lbl = Label(text=sec_title, font_size="16sp", bold=True,
+                                color=THEME["accent_dark"], size_hint_y=None, height=dp(26),
+                                halign="left", valign="middle")
+                sec_lbl.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+                body.add_widget(sec_lbl)
+                rows = (len(items) + 1) // 2
+                grid = GridLayout(cols=2, spacing=dp(10), size_hint_y=None,
+                                  height=dp(96 * rows + 10 * max(0, rows - 1)))
+                for cid, icon, title, subtitle in items:
+                    card = Panel(bg=THEME["soft"][color_i % len(THEME["soft"])], radius=14,
+                                 size_hint=(1, None), height=dp(96),
+                                 padding=[dp(10), dp(8), dp(10), dp(8)])
+                    color_i += 1
+                    card.add_widget(Label(text=icon, font_size="26sp", size_hint_y=None, height=dp(34)))
+                    card.add_widget(Label(text=title, font_size="16sp", bold=True, color=THEME["text"],
+                                          halign="left", valign="middle",
+                                          size_hint_y=None, height=dp(24)))
+                    card.add_widget(Label(text=subtitle, font_size="12sp", color=THEME["muted"],
+                                          halign="left", valign="top"))
+                    card.children[1].bind(size=lambda inst, s: setattr(inst, "text_size", s))
+                    card.bind(on_touch_down=self._card_tap(cid))
+                    grid.add_widget(card)
+                body.add_widget(grid)
+            scroll = ScrollView(do_scroll_x=False)
+            scroll.add_widget(body)
+            root.add_widget(scroll)
+
+            foot = Panel(radius=12, size_hint_y=None, height=dp(48),
+                         padding=[dp(12), dp(6), dp(12), dp(6)])
+            foot_row = BoxLayout(orientation="horizontal", spacing=dp(8))
+            t_lbl = Label(text="Тема", font_size="14sp", color=THEME["muted"],
+                          size_hint_x=None, width=dp(64), halign="left", valign="middle")
+            t_lbl.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+            foot_row.add_widget(t_lbl)
+            theme_spinner = Spinner(text=self.theme_name, values=list(THEMES.keys()),
+                                    font_size="14sp", size_hint_y=None, height=dp(36),
+                                    background_normal="", background_down="",
+                                    background_color=THEME["grey"])
+            theme_spinner.bind(text=self.set_theme)
+            foot_row.add_widget(theme_spinner)
+            foot.add_widget(foot_row)
+            root.add_widget(foot)
+            screen.add_widget(root)
+            return screen
+
+        def _card_tap(self, cid):
+            def handler(instance, touch):
+                if instance.collide_point(*touch.pos) and self.root:
+                    self.open_screen(cid)
+            return handler
+
+        def calc_screen(self, cfg):
+            screen = Screen(name=cfg["id"])
+            root = BoxLayout(orientation="vertical", padding=[dp(12), dp(12), dp(12), dp(20)], spacing=dp(10))
+            root.bind(on_touch_down=self._maybe_blur(cfg["id"]))
+            header = Panel(bg=THEME["accent"], radius=16, size_hint_y=None, height=dp(54),
+                           padding=[dp(6), dp(6), dp(12), dp(6)])
+            header_row = BoxLayout(orientation="horizontal", spacing=dp(8))
+            back = Tile(bg=(1, 1, 1, 0.25), radius=10, text="←", font_size="20sp",
+                        bold=True, color=(1, 1, 1, 1), size_hint=(None, 1), width=dp(44))
+            back.bind(on_release=lambda inst: self.open_screen("home"))
+            header_row.add_widget(back)
+            title = Label(text=cfg["title"], font_size="19sp", bold=True, color=(1, 1, 1, 1),
+                          halign="left", valign="middle")
+            title.bind(size=lambda inst, s: setattr(inst, "text_size", s))
+            header_row.add_widget(title)
+            header.add_widget(header_row)
+            root.add_widget(header)
+
+            scroll = ScrollView(do_scroll_x=False, bar_color=THEME["accent"])
+            grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(8),
+                              padding=[dp(2), dp(2), dp(2), dp(2)])
+            grid.bind(minimum_height=grid.setter("height"))
+
+            widgets = {}
+            for f in cfg["fields"]:
+                key, label, kind = f[0], f[1], f[2]
+                default = f[3] if len(f) > 3 else ""
+                options = f[4] if len(f) > 4 else None
+                if cfg["id"] in self.saved and key in self.saved[cfg["id"]]:
+                    default = self.saved[cfg["id"]][key]
+                row, widget = make_row(label, kind, default, options)
+                widgets[key] = widget
+                grid.add_widget(row)
+            result_panel = Panel(bg=THEME["accent_soft"], radius=14, orientation="vertical",
+                                 size_hint_y=None, height=dp(90), padding=[dp(12), dp(8), dp(12), dp(8)])
+            result_scroll = ScrollView(do_scroll_x=False)
+            result = Label(text="Нажмите «Рассчитать»", font_size="15sp", color=THEME["text"],
+                           halign="left", valign="top", size_hint_y=None)
+            result.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
+            result.bind(texture_size=result.setter("height"))
+            result_scroll.add_widget(result)
+            result_panel.add_widget(result_scroll)
+            grid.add_widget(result_panel)
+
+            scroll.add_widget(grid)
+            root.add_widget(scroll)
+
+            btn_row = BoxLayout(orientation="horizontal", spacing=dp(8),
+                                size_hint_y=None, height=dp(52))
+            reset = Tile(text="Сбросить", font_size="14sp", color=THEME["text"], bg=THEME["grey"],
+                         size_hint_x=0.24)
+            reset.bind(on_release=lambda inst: self.do_reset(cfg, widgets, result, result_panel))
+            btn = Tile(text="Рассчитать", font_size="17sp", bold=True, color=(1, 1, 1, 1),
+                       size_hint_x=0.48)
+            btn.bind(on_release=lambda inst: self.do_calc(cfg, widgets, result, result_panel))
+            share = Tile(text="Отправить", font_size="14sp", color=(1, 1, 1, 1),
+                         bg=THEME["accent_dark"], size_hint_x=0.28)
+            share.bind(on_release=lambda inst: self.share_result(result.text))
+            btn_row.add_widget(reset)
+            btn_row.add_widget(btn)
+            btn_row.add_widget(share)
+            root.add_widget(btn_row)
+            screen.add_widget(root)
+
+            self.field_widgets[cfg["id"]] = widgets
+            return screen
+
+        def do_calc(self, cfg, widgets, result, result_panel):
+            values = {}
+            try:
+                for f in cfg["fields"]:
+                    key, kind = f[0], f[2]
+                    if kind == "num":
+                        values[key] = parse_float(widgets[key].text)
+                    else:
+                        values[key] = widgets[key].text
+                labels = {f[0]: f[1] for f in cfg["fields"]}
+                for key in cfg["req"]:
+                    if values.get(key) is None:
+                        raise ValueError("Заполните поле: " + labels[key])
+                text = cfg["compute"](values)
+                color = THEME["text"]
+            except ValueError as e:
+                text, color = "⚠ " + str(e), DANGER
+            except (ZeroDivisionError, KeyError, TypeError):
+                text, color = "⚠ Проверьте введённые числа.", DANGER
+            result.text = text
+            result.color = color
+            self.save_state()
+
+        def _toast(self, msg):
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                Toast = autoclass("android.widget.Toast")
+                Toast.makeText(PythonActivity.mActivity, msg, Toast.LENGTH_SHORT).show()
+            except Exception:
+                pass
+
+        def share_result(self, text):
+            if not text or text.startswith("⚠") or text == "Нажмите «Рассчитать»":
+                self._toast("Сначала посчитайте")
+                return
+            share_text = "Стройка и ремонт — расчёт:\n" + text
+            # путь 1: системное меню отправки
+            try:
+                from jnius import autoclass
+                Intent = autoclass("android.content.Intent")
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                intent = Intent()
+                intent.setAction(Intent.ACTION_SEND)
+                intent.setType("text/plain")
+                intent.putExtra(Intent.EXTRA_TEXT, share_text)
+                PythonActivity.mActivity.startActivity(
+                    Intent.createChooser(intent, "Отправить результат"))
+                return
+            except Exception:
+                pass
+            # путь 2 (запасной): копируем в буфер обмена
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                Context = autoclass("android.content.Context")
+                ClipData = autoclass("android.content.ClipData")
+                clipboard = PythonActivity.mActivity.getSystemService(Context.CLIPBOARD_SERVICE)
+                clipboard.setPrimaryClip(ClipData.newPlainText("repaircalc", share_text))
+                self._toast("Скопировано в буфер обмена")
+                return
+            except Exception:
+                pass
+            self._toast("Не удалось отправить")
+
+
+    RepairApp().run()
+
+except BaseException:
+    CRASH = traceback.format_exc()
+    traceback.print_exc()
+    if not _crash_screen(CRASH):
+        if not _crash_share(CRASH):
+            if _crash_file(CRASH):
+                _crash_toast("Ошибка записана в Download/repaircalc_crash.txt")
