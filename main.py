@@ -799,10 +799,6 @@ try:
                 self._rect = RoundedRectangle(radius=[dp(radius)])
             self.bind(pos=self._sync, size=self._sync)
 
-        def _sync(self, *_args):
-            self._rect.pos = self.pos
-            self._rect.size = self.size
-
 
     DEBUG_TB = None
 
